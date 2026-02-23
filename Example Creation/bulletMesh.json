@@ -1,0 +1,138 @@
+{
+  "Points": {
+    "Point 1": {
+      "X": 0.0,
+      "Y": 0.0,
+      "Z": 0.0
+    },
+    "Point 2": {
+      "X": 0.0,
+      "Y": 1.0,
+      "Z": 0.0
+    },
+    "Point 3": {
+      "X": 0.0,
+      "Y": 10.0,
+      "Z": 0.0
+    },
+    "Point 4": {
+      "X": 5.0,
+      "Y": 0.0,
+      "Z": 0.0
+    },
+    "Point 7": {
+      "X": 6.0,
+      "Y": 1.0,
+      "Z": 0.0
+    },
+    "Point 8": {
+      "X": 9.0,
+      "Y": 1.0,
+      "Z": 0.0
+    },
+    "Point 9": {
+      "X": 9.0,
+      "Y": 0.0,
+      "Z": 0.0
+    },
+    "Point 10": {
+      "X": 20.0,
+      "Y": 0.0,
+      "Z": 0.0
+    },
+    "Point 11": {
+      "X": 20.0,
+      "Y": 10.0,
+      "Z": 0.0
+    },
+    "Point 5": {
+      "X": 6.0,
+      "Y": 10.0,
+      "Z": 0.0
+    },
+    "Point 12": {
+      "X": 5.0,
+      "Y": 10.0,
+      "Z": 0.0
+    },
+    "Point 13": {
+      "X": 9.0,
+      "Y": 10.0,
+      "Z": 0.0
+    },
+    "Point 14": {
+      "X": 20.0,
+      "Y": 1.0,
+      "Z": 0.0
+    }
+  },
+  "Layers": {
+    "Layer 0": {
+      "Points (Ref)": "1, 2, 3, 4, 7, 8, 9, 10, 11, 5, 12, 13, 14"
+    }
+  },
+  "Connections": {
+    "Connection 1": {
+      "Point 1": 1,
+      "Point 2": 2
+    },
+    "Connection 2": {
+      "Point 1": 1,
+      "Point 2": 4
+    },
+    "Connection 5": {
+      "Point 1": 7,
+      "Point 2": 8
+    },
+    "Connection 8": {
+      "Point 1": 2,
+      "Point 2": 3
+    },
+    "Connection 9": {
+      "Point 1": 3,
+      "Point 2": 11
+    },
+    "Connection 10": {
+      "Point 1": 10,
+      "Point 2": 11
+    },
+    "Connection 11": {
+      "Point 1": 9,
+      "Point 2": 10
+    },
+    "Connection 12": {
+      "Point 1": 8,
+      "Point 2": 9
+    },
+    "Connection 14": {
+      "Point 1": 4,
+      "Point 2": 7
+    },
+    "Connection 15": {
+      "Point 1": 4,
+      "Point 2": 12
+    },
+    "Connection 16": {
+      "Point 1": 5,
+      "Point 2": 7
+    },
+    "Connection 17": {
+      "Point 1": 8,
+      "Point 2": 14
+    },
+    "Connection 18": {
+      "Point 1": 8,
+      "Point 2": 13
+    }
+  },
+  "Edges": {},
+  "Hexes": {},
+  "Patches": {},
+  "Specs": {
+    "sketch_plane": "XY",
+    "project_name": "Untitled Project",
+    "project_description": "",
+    "unit_system": "m",
+    "unit_sci_exponent": "0"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "Points": {
+    "Point 1": {
+      "X": 0.0,
+      "Y": 0.0,
+      "Z": 0.0
+    },
+    "Point 2": {
+      "X": 0.0,
+      "Y": 1.0,
+      "Z": 0.0
+    },
+    "Point 13": {
+      "X": 5.0,
+      "Y": 0.0,
+      "Z": 0.0
+    },
+    "Point 14": {
+      "X": 4.992751299883208,
+      "Y": 0.8680665503456982,
+      "Z": 0.0
+    },
+    "Point 15": {
+      "X": 6.004998043847581,
+      "Y": 0.9700525477758146,
+      "Z": 0.0
+    },
+    "Point 16": {
+      "X": 6.004998043847581,
+      "Y": 0.036375188291810884,
+      "Z": 0.0
+    }
+  },
+  "Layers": {
+    "Layer 0": {
+      "Points (Ref)": "1, 2, 13, 14, 15, 16"
+    }
+  },
+  "Connections": {
+    "Connection 1": {
+      "Point 1": 1,
+      "Point 2": 2
+    }
+  },
+  "Edges": {},
+  "Hexes": {},
+  "Patches": {},
+  "Specs": {
+    "sketch_plane": "XY",
+    "project_name": "Untitled Project",
+    "project_description": "",
+    "unit_system": "m",
+    "unit_sci_exponent": "0"
+  }
+}
