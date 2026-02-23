@@ -31,7 +31,14 @@ class PatchEditorDialog:
         self.is_custom = is_custom
 
         # State
-        self.selected_faces = set(patch_data.get('faces', []))
+        # FIXED: Handle new face format where faces are dicts with 'face_id'
+        faces_data = patch_data.get('faces', [])
+        if faces_data and isinstance(faces_data[0], dict):
+            # New format: list of dicts with 'face_id'
+            self.selected_faces = {f.get('face_id') for f in faces_data if isinstance(f, dict)}
+        else:
+            # Legacy format: list of face IDs
+            self.selected_faces = set(faces_data)
         self.current_patch_type = tk.StringVar(value="patch")
         self.param_vars = {}
         self.custom_type_var = tk.StringVar(value="")

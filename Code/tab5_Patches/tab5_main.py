@@ -12,6 +12,9 @@ FIXES:
 - Axes now in bottom right corner
 - Added Patch Normals tab for editing face normals
 - Added Patch Editor for editing existing patches
+- FIXED: Error handling for find_closest on empty canvas
+- FIXED: Safe dict access for patch_data and mesh_data
+- FIXED: Proper exception handling in all callbacks
 """
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -234,7 +237,8 @@ class Tab5HexPatches:
         from tab5_Patches.tab5_patch_panels import PatchAssignmentPanel
         self.patch_panel = PatchAssignmentPanel(
             self.tab_assignment, self.mesh_data, self.colors,
-            on_assign_callback=self._on_patch_assigned
+            on_assign_callback=self._on_patch_assigned,
+            renderer=self.renderer  # Pass renderer for face point ID lookup
         )
 
         # Patch normals tab (in normals tab)
@@ -437,10 +441,14 @@ class Tab5HexPatches:
 
         # If patch editor is open, handle face selection for editor
         if self.patch_editor_dialog and self.renderer.patch_edit_mode:
-            item = self.canvas.find_closest(event.x, event.y)[0]
-            if item in self.renderer._polygon_to_face:
-                face_id = self.renderer._polygon_to_face[item]
-                self.patch_editor_dialog.toggle_face_selection(face_id)
+            try:
+                item = self.canvas.find_closest(event.x, event.y)[0]
+                if item in self.renderer._polygon_to_face:
+                    face_id = self.renderer._polygon_to_face[item]
+                    self.patch_editor_dialog.toggle_face_selection(face_id)
+            except (IndexError, KeyError):
+                # No items on canvas or no polygon mapping
+                pass
             return
 
         # FIX: For normal clicks, delegate to the renderer's handler
@@ -454,7 +462,7 @@ class Tab5HexPatches:
             for face_id in selected_faces:
                 # Mark face as hidden
                 for face in self.renderer.all_faces:
-                    if face['face_id'] == face_id:
+                    if face.get('face_id') == face_id:
                         face['is_visible'] = False
 
             # Clear selection and redraw
@@ -498,24 +506,50 @@ class Tab5HexPatches:
         pass
 
     def _on_patch_assigned(self, patch_data):
-        """Handle patch assignment"""
+        """Handle patch assignment with safe dict access - FIXED for new face format"""
         if 'clear' in patch_data:
             if self.renderer:
                 self.renderer.clear_selection()
             return
 
         # Store patch in mesh_data (now a dict)
-        patch_name = patch_data['name']
+        patch_name = patch_data.get('name')
+        if not patch_name:
+            messagebox.showwarning("Warning", "Patch name is missing")
+            return
 
         # If patch exists, append faces (avoiding duplicates)
         if patch_name in self.mesh_data.patches:
             existing = self.mesh_data.patches[patch_name]
-            existing_faces = set(existing.get('faces', []))
-            new_faces = set(patch_data['faces'])
-            # Use union to avoid duplicates
-            existing['faces'] = list(existing_faces | new_faces)
+            # FIXED: Handle new face format where faces are dicts with 'face_id'
+            existing_faces = existing.get('faces', [])
+            new_faces = patch_data.get('faces', [])
+
+            # Create a set of existing face_ids for deduplication
+            # Handle both new format (dicts) and legacy format (integers)
+            existing_face_ids = set()
+            for f in existing_faces:
+                if isinstance(f, dict) and 'face_id' in f:
+                    existing_face_ids.add(f['face_id'])
+                elif isinstance(f, int):
+                    existing_face_ids.add(f)
+
+            # Add new faces that aren't already present
+            merged_faces = list(existing_faces)  # Start with existing
+            for face in new_faces:
+                if isinstance(face, dict) and 'face_id' in face:
+                    if face['face_id'] not in existing_face_ids:
+                        merged_faces.append(face)
+                        existing_face_ids.add(face['face_id'])
+                elif isinstance(face, int):
+                    # Legacy format: just a face ID
+                    if face not in existing_face_ids:
+                        merged_faces.append(face)
+                        existing_face_ids.add(face)
+
+            existing['faces'] = merged_faces
         else:
-            print(patch_name)
+            print(f"Creating new patch: {patch_name}")
             self.mesh_data.patches[patch_name] = patch_data
 
         # Update UI
@@ -535,14 +569,16 @@ class Tab5HexPatches:
             )
 
     def _update_status(self):
-        """Update status labels"""
-        num_blocks = len(getattr(self.mesh_data, 'hex_faces', []))
+        """Update status labels with safe access"""
+        # SAFE: Use getattr with default
+        num_blocks = len(getattr(self.mesh_data, 'hex_blocks', {}))
         self.block_count_label.config(text="Blocks: %d" % num_blocks)
 
         if self.renderer:
-            visible_faces = sum(1 for f in self.renderer.all_faces if f['is_visible'])
+            visible_faces = sum(1 for f in self.renderer.all_faces if f.get('is_visible', False))
             self.face_count_label.config(text="Visible faces: %d" % visible_faces)
 
+        # SAFE: Use getattr with default
         num_patches = len(getattr(self.mesh_data, 'patches', {}))
         self.status_label.config(text="Ready - %d patches defined" % num_patches)
 
@@ -572,8 +608,8 @@ class Tab5HexPatches:
         # Calculate bounding box of all visible vertices
         all_verts = []
         for face in self.renderer.all_faces:
-            if face['is_visible']:
-                all_verts.extend(face['vertices'])
+            if face.get('is_visible', False):
+                all_verts.extend(face.get('vertices', []))
 
         if not all_verts:
             return

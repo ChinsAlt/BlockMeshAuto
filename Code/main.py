@@ -2,12 +2,14 @@
 OpenFOAM blockMesh Builder - Main Application
 Dark Mode Edition with Edge Editor Tab and New Hex/Patch System
 Updated to work with new data structure (Points, Layers, Connections, Edges, Hexes, Patches, Specs)
+FIXED: Better error handling for auto-save and file operations
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
 import os
+import sys
 
 from mesh_data import MeshData
 from tab1_projectSettings.tab1_main import TabProjectSettings
@@ -23,7 +25,7 @@ class MeshBuilderApp:
         self.root = root
         self.root.title("Block Mesh Auto")
         self.root.geometry("1400x900")
-        
+
         # Dark mode colors
         self.colors = {
             'bg': '#1e1e1e',
@@ -36,33 +38,59 @@ class MeshBuilderApp:
             'border': '#3e3e42',
             'button_bg': '#0e639c',
             'button_fg': '#ffffff',
-            'button_fg': '#ffffff',
             'tab_bg': '#2d2d2d',
             'tab_fg': '#ffffff',
             'tab_selected': '#007acc'
         }
-        
+
         self.mesh_data = MeshData()
-        
-        # Ensure temp directory exists
-        if not os.path.exists("temp"):
-            os.makedirs("temp")
-        
+
+        # Ensure temp directory exists - with better error handling
+        self._ensure_temp_dir()
+
         self.setup_dark_mode()
         self.setup_top_bar()
         self.setup_notebook()
         self.setup_tabs()
-        
+
+        # Start auto-save with error tracking
+        self.auto_save_error_count = 0
         self.auto_save()
-        
+
+    def _ensure_temp_dir(self):
+        """Ensure temp directory exists with proper error handling"""
+        temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
+        try:
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir, exist_ok=True)
+                print(f"Created temp directory: {temp_dir}")
+            # Test write permissions
+            test_file = os.path.join(temp_dir, ".write_test")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+        except Exception as e:
+            print(f"Warning: Could not create or write to temp directory: {e}")
+            # Try to use a fallback temp location
+            try:
+                import tempfile
+                self.temp_dir = tempfile.gettempdir()
+                print(f"Using system temp directory instead: {self.temp_dir}")
+            except:
+                self.temp_dir = temp_dir  # Use original even if it fails
+
+    def get_temp_dir(self):
+        """Get the temp directory path"""
+        return getattr(self, 'temp_dir', os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp"))
+
     def setup_dark_mode(self):
         """Configure dark mode styles"""
         self.root.configure(bg=self.colors['bg'])
-        
+
         # Configure ttk styles for dark mode
         style = ttk.Style()
         style.theme_use('default')
-        
+
         # Notebook styling
         style.configure('TNotebook', background=self.colors['secondary'], tabmargins=[2, 5, 2, 0])
         style.configure('TNotebook.Tab', 
@@ -74,7 +102,7 @@ class MeshBuilderApp:
                  background=[('selected', self.colors['tab_selected']),
                            ('active', self.colors['accent'])],
                  foreground=[('selected', self.colors['tab_fg'])])
-        
+
         # Frame styling
         style.configure('TFrame', background=self.colors['bg'])
         style.configure('TLabelframe', background=self.colors['secondary'], 
@@ -83,27 +111,27 @@ class MeshBuilderApp:
                        background=self.colors['secondary'],
                        foreground=self.colors['fg'],
                        font=('Arial', 10, 'bold'))
-        
+
         # Other widget styles
         style.configure('TLabel', background=self.colors['bg'], foreground=self.colors['fg'])
         style.configure('TButton', 
                        background=self.colors['button_bg'],
                        foreground=self.colors['button_fg'])
-        
+
     def setup_top_bar(self):
         """Create top bar with dark mode styling"""
         top_frame = tk.Frame(self.root, bg=self.colors['secondary'], height=50)
         top_frame.pack(side=tk.TOP, fill=tk.X)
         top_frame.pack_propagate(False)
-        
+
         tk.Label(top_frame, text="OpenFOAM Mesh Builder", 
                 font=("Arial", 14, "bold"), 
                 bg=self.colors['secondary'], 
                 fg=self.colors['fg']).pack(side=tk.LEFT, padx=10)
-        
+
         button_frame = tk.Frame(top_frame, bg=self.colors['secondary'])
         button_frame.pack(side=tk.RIGHT, padx=10)
-        
+
         btn_style = {
             'bg': self.colors['button_bg'],
             'fg': self.colors['button_fg'],
@@ -112,16 +140,16 @@ class MeshBuilderApp:
             'relief': tk.FLAT,
             'cursor': 'hand2'
         }
-        
+
         tk.Button(button_frame, text="💾 Save", command=self.save_to_json, **btn_style).pack(side=tk.LEFT, padx=2)
         tk.Button(button_frame, text="📂 Load", command=self.load_from_json, **btn_style).pack(side=tk.LEFT, padx=2)
         tk.Button(button_frame, text="🔄 New", command=self.new_project, **btn_style).pack(side=tk.LEFT, padx=2)
-        
+
     def setup_notebook(self):
         """Create the tabbed notebook interface"""
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True)
-        
+
         # Create tab frames
         self.tab_project = tk.Frame(self.notebook, bg=self.colors['bg'])
         self.tab_2d = tk.Frame(self.notebook, bg=self.colors['bg'])
@@ -129,7 +157,7 @@ class MeshBuilderApp:
         self.tab_grid = tk.Frame(self.notebook, bg=self.colors['bg'])
         self.tab_3d = tk.Frame(self.notebook, bg=self.colors['bg'])
         self.tab_export = tk.Frame(self.notebook, bg=self.colors['bg'])
-        
+
         # Add tabs to notebook
         self.notebook.add(self.tab_project, text="1. Project Settings")
         self.notebook.add(self.tab_2d, text="2. Points & Connections")
@@ -137,7 +165,7 @@ class MeshBuilderApp:
         self.notebook.add(self.tab_grid, text="4. Hex Blocks")
         self.notebook.add(self.tab_3d, text="5. Hex View & Patches")
         self.notebook.add(self.tab_export, text="6. Export blockMeshDict")
-        
+
     def setup_tabs(self):
         """Initialize all tab components"""
         self.project_settings = TabProjectSettings(self.tab_project, self.mesh_data)
@@ -146,88 +174,172 @@ class MeshBuilderApp:
         self.hex_blocks = TabHexBlockMaking(self.tab_grid, self.mesh_data)
         self.patches_3d = Tab5HexPatches(self.tab_3d, self.mesh_data)
         self.export_tab = TabExport(self.tab_export, self.mesh_data)
-    
+
     def get_temp_filename(self):
         """Get the temp filename based on project name"""
         safe_name = self.mesh_data.get_safe_project_name()
-        return os.path.join("temp", f"{safe_name}_temp.json")
-    
+        return os.path.join(self.get_temp_dir(), f"{safe_name}_temp.json")
+
     def get_default_save_filename(self):
         """Get the default save filename based on project name"""
         safe_name = self.mesh_data.get_safe_project_name()
         return f"{safe_name}.json"
-    
+
     def save_to_json(self):
-        """Save project to JSON file"""
+        """Save project to JSON file with better error handling"""
         if hasattr(self.project_settings, 'save_all_settings'):
-            self.project_settings.save_all_settings()
-        
+            try:
+                self.project_settings.save_all_settings()
+            except Exception as e:
+                print(f"Warning: Could not save project settings: {e}")
+
         default_filename = self.get_default_save_filename()
-        
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            initialfile=default_filename
-        )
-        
+
+        try:
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                initialfile=default_filename
+            )
+        except Exception as e:
+            messagebox.showerror("Dialog Error", f"Could not open save dialog: {e}")
+            return
+
         if filename:
             try:
+                # Validate we can write to this location
+                test_path = os.path.dirname(filename)
+                if test_path and not os.path.exists(test_path):
+                    os.makedirs(test_path, exist_ok=True)
+
                 data = self.mesh_data.to_dict()
-                with open(filename, 'w') as f:
+                with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2)
                 messagebox.showinfo("Success", f"Project saved to {filename}")
+            except PermissionError as e:
+                messagebox.showerror("Permission Error", 
+                    f"Cannot save to {filename}:Permission denied."
+                    f"Try saving to a different location where you have write permissions.")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save: {str(e)}")
-    
+
     def load_from_json(self):
-        """Load project from JSON file"""
-        filename = filedialog.askopenfilename(
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-        )
-        
+        """Load project from JSON file with better error handling"""
+        try:
+            filename = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+            )
+        except Exception as e:
+            messagebox.showerror("Dialog Error", f"Could not open file dialog: {e}")
+            return
+
         if filename:
             try:
-                with open(filename, 'r') as f:
+                with open(filename, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+
+                # Validate data structure before loading
+                if not isinstance(data, dict):
+                    raise ValueError("Invalid JSON structure: root must be an object")
+
                 self.mesh_data.from_dict(data)
-                
-                # Update all tab views
-                self.project_settings.update_display()
-                self.editor_2d.update_layer_list()
-                self.editor_2d.update_dual_view_buttons()
-                self.editor_2d.update_plot()
-                
-                # Update edge editor
-                self.edge_editor._update_edge_list()
-                self.edge_editor.viewer.refresh()
-                
-                self.hex_blocks.refresh_layers()
-                self.hex_blocks.update_block_list()
-                
-                # Update patches/3D view
-                self.patches_3d._refresh_view()
-                
-                self.export_tab.update_summary()
-                
+
+                # Update all tab views with error handling
+                self._update_all_views()
+
                 messagebox.showinfo("Success", f"Project loaded from {filename}")
+            except json.JSONDecodeError as e:
+                messagebox.showerror("JSON Error", f"Invalid JSON file:{str(e)}")
+            except PermissionError as e:
+                messagebox.showerror("Permission Error", 
+                    f"Cannot read {filename}:Permission denied.")
+            except ValueError as e:
+                messagebox.showerror("Data Error", str(e))
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load: {str(e)}")
-    
+                import traceback
+                traceback.print_exc()
+
+    def _update_all_views(self):
+        """Update all tab views with error handling"""
+        try:
+            self.project_settings.update_display()
+        except Exception as e:
+            print(f"Warning: Could not update project settings: {e}")
+
+        try:
+            self.editor_2d.update_layer_list()
+            self.editor_2d.update_dual_view_buttons()
+            self.editor_2d.update_plot()
+        except Exception as e:
+            print(f"Warning: Could not update 2D editor: {e}")
+
+        try:
+            self.edge_editor._update_edge_list()
+            self.edge_editor.viewer.refresh()
+        except Exception as e:
+            print(f"Warning: Could not update edge editor: {e}")
+
+        try:
+            self.hex_blocks.refresh_layers()
+            self.hex_blocks.update_block_list()
+        except Exception as e:
+            print(f"Warning: Could not update hex blocks: {e}")
+
+        try:
+            self.patches_3d._refresh_view()
+        except Exception as e:
+            print(f"Warning: Could not update patches view: {e}")
+
+        try:
+            self.export_tab.update_summary()
+        except Exception as e:
+            print(f"Warning: Could not update export tab: {e}")
+
     def auto_save(self):
-        """Auto-save project every 30 seconds to temp folder"""
+        """Auto-save project every 30 seconds to temp folder with better error handling"""
         try:
             if hasattr(self.project_settings, 'save_all_settings'):
-                self.project_settings.save_all_settings()
-            
+                try:
+                    self.project_settings.save_all_settings()
+                except Exception as e:
+                    if self.auto_save_error_count < 3:
+                        print(f"Auto-save warning (settings): {e}")
+
             temp_file = self.get_temp_filename()
+            temp_dir = os.path.dirname(temp_file)
+
+            # Ensure temp directory exists
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir, exist_ok=True)
+
             data = self.mesh_data.to_dict()
-            with open(temp_file, 'w') as f:
+
+            # Write to a temp file first, then rename (atomic operation)
+            temp_write_file = temp_file + ".tmp"
+            with open(temp_write_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
+
+            # Rename to final filename (atomic on most systems)
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            os.rename(temp_write_file, temp_file)
+
+            # Reset error count on success
+            self.auto_save_error_count = 0
+
+        except PermissionError as e:
+            self.auto_save_error_count += 1
+            if self.auto_save_error_count <= 3:
+                print(f"Auto-save permission error (attempt {self.auto_save_error_count}): {e}")
         except Exception as e:
-            print(f"Auto-save error: {e}")
-        
+            self.auto_save_error_count += 1
+            if self.auto_save_error_count <= 3:
+                print(f"Auto-save error (attempt {self.auto_save_error_count}): {e}")
+
+        # Schedule next auto-save
         self.root.after(30000, self.auto_save)
-    
+
     def new_project(self):
         """Start a new project"""
         result = messagebox.askyesnocancel("New Project", 
@@ -236,40 +348,59 @@ class MeshBuilderApp:
             return
         elif result:
             self.save_to_json()
-        
+
         # Reset mesh data
         self.mesh_data = MeshData()
-        
+
         # Reset all tab components
         self.project_settings.mesh_data = self.mesh_data
         self.editor_2d.mesh_data = self.mesh_data
         self.edge_editor.mesh_data = self.mesh_data
-        self.edge_editor.viewer.mesh_data = self.mesh_data
         self.hex_blocks.mesh_data = self.mesh_data
         self.patches_3d.mesh_data = self.mesh_data
-        
+
+        # Also update edge editor viewer if it exists
+        if hasattr(self.edge_editor, 'viewer'):
+            self.edge_editor.viewer.mesh_data = self.mesh_data
+
         # Update all views
-        self.project_settings.update_display()
-        self.editor_2d.selected_points = []
-        self.editor_2d.dual_view_layers = []
-        self.editor_2d.dual_view_var.set(False)
-        
-        self.editor_2d.update_layer_list()
-        self.editor_2d.update_dual_view_buttons()
-        self.editor_2d.update_plot()
-        
-        # Reset edge editor
-        self.edge_editor._reset_creation()
-        self.edge_editor._update_edge_list()
-        
-        self.hex_blocks.refresh_layers()
-        self.hex_blocks.update_block_list()
-        
-        # Refresh patches tab
-        self.patches_3d._refresh_view()
-        
-        self.export_tab.update_summary()
-        
+        try:
+            self.project_settings.update_display()
+        except:
+            pass
+
+        try:
+            self.editor_2d.selected_points = []
+            self.editor_2d.dual_view_layers = []
+            self.editor_2d.dual_view_var.set(False)
+            self.editor_2d.update_layer_list()
+            self.editor_2d.update_dual_view_buttons()
+            self.editor_2d.update_plot()
+        except:
+            pass
+
+        try:
+            self.edge_editor._reset_creation()
+            self.edge_editor._update_edge_list()
+        except:
+            pass
+
+        try:
+            self.hex_blocks.refresh_layers()
+            self.hex_blocks.update_block_list()
+        except:
+            pass
+
+        try:
+            self.patches_3d._refresh_view()
+        except:
+            pass
+
+        try:
+            self.export_tab.update_summary()
+        except:
+            pass
+
         messagebox.showinfo("New Project", "Started a new project")
 
 

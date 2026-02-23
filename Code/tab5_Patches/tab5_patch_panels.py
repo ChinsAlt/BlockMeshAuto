@@ -11,11 +11,12 @@ class PatchAssignmentPanel:
     Simplified panel for assigning blockMesh boundary types to faces.
     """
 
-    def __init__(self, parent, mesh_data, colors, on_assign_callback):
+    def __init__(self, parent, mesh_data, colors, on_assign_callback, renderer=None):
         self.parent = parent
         self.mesh_data = mesh_data
         self.colors = colors
         self.on_assign_callback = on_assign_callback
+        self.renderer = renderer  # Store renderer reference
 
         # Import simplified patch config
         from tab5_Patches.tab5_patch_config import (
@@ -226,7 +227,7 @@ class PatchAssignmentPanel:
         )
 
     def _assign_patch(self):
-        """Assign patch to selected faces"""
+        """Assign patch to selected faces - FIXED to store point IDs"""
         if not self.selected_faces:
             messagebox.showwarning("Warning", "No faces selected")
             return
@@ -261,11 +262,44 @@ class PatchAssignmentPanel:
                                       "Add faces to existing patch?"):
                 return
 
-        # Create patch data
+        # CRITICAL FIX: Get the renderer to look up point IDs for each face
+        # We need access to the renderer's all_faces to get global_indices
+        face_data = []
+
+        # Use the renderer passed to us or try to find it
+        renderer = self.renderer
+        if renderer is None and hasattr(self.parent, 'master') and hasattr(self.parent.master, 'renderer'):
+            renderer = self.parent.master.renderer
+        elif renderer is None and hasattr(self.mesh_data, '_renderer_ref'):
+            renderer = self.mesh_data._renderer_ref
+
+        if renderer and hasattr(renderer, 'all_faces'):
+            # Build lookup from face_id to face data
+            face_lookup = {f.get('face_id'): f for f in renderer.all_faces if f.get('face_id') is not None}
+
+            for face_id in self.selected_faces:
+                face_info = face_lookup.get(face_id)
+                if face_info:
+                    point_ids = face_info.get('global_indices', [])
+                    if len(point_ids) == 4:
+                        face_data.append({
+                            'face_id': face_id,
+                            'point_ids': list(point_ids)  # Store the 4 point IDs!
+                        })
+        else:
+            # Fallback: store just face IDs if renderer not available
+            # This will need to be resolved during export
+            for face_id in self.selected_faces:
+                face_data.append({
+                    'face_id': face_id,
+                    'point_ids': None  # Will be resolved later
+                })
+
+        # Create patch data with point IDs included
         patch_data = {
             'name': patch_name,
             'type': openfoam_type,
-            'faces': self.selected_faces.copy(),
+            'faces': face_data,  # Now contains dicts with face_id and point_ids
             'parameters': params
         }
 
@@ -274,7 +308,7 @@ class PatchAssignmentPanel:
             self.on_assign_callback(patch_data)
 
         messagebox.showinfo("Success", 
-                          f"Assigned {len(self.selected_faces)} faces to patch '{patch_name}'\n"
+                          f"Assigned {len(face_data)} faces to patch '{patch_name}'\n"
                           f"Type: {openfoam_type}")
 
     def _clear_selection(self):
@@ -375,7 +409,12 @@ class PatchListPanel:
 
         for patch_name, patch_data in self.mesh_data.patches.items():
             if isinstance(patch_data, dict):
-                num_faces = len(patch_data.get('faces', []))
+                faces = patch_data.get('faces', [])
+                # Count faces properly (new format has dicts)
+                if faces and isinstance(faces[0], dict):
+                    num_faces = len(faces)
+                else:
+                    num_faces = len(faces)
                 patch_type = patch_data.get('type', 'unknown')
             else:
                 # Handle tuple format
@@ -402,7 +441,17 @@ class PatchListPanel:
                 info = f"Name: {patch_name}\n"
                 if isinstance(patch_data, dict):
                     info += f"Type: {patch_data.get('type', 'unknown')}\n"
-                    info += f"Faces: {len(patch_data.get('faces', []))}"
+                    faces = patch_data.get('faces', [])
+                    if faces and isinstance(faces[0], dict):
+                        num_faces = len(faces)
+                        # Show first face's point IDs as example
+                        first_face = faces[0]
+                        if 'point_ids' in first_face:
+                            info += f"Faces: {num_faces} (e.g., {first_face['point_ids']})"
+                        else:
+                            info += f"Faces: {num_faces}"
+                    else:
+                        info += f"Faces: {len(faces)}"
                     params = patch_data.get('parameters', {})
                 else:
                     info += f"Type: {patch_data[1] if len(patch_data) > 1 else 'unknown'}\n"
@@ -470,10 +519,17 @@ class PatchListPanel:
                 patch_name = patch_names[idx]
                 patch_data = self.mesh_data.patches[patch_name]
 
+                # Extract face IDs from patch data
                 if isinstance(patch_data, dict):
                     faces = patch_data.get('faces', [])
+                    if faces and isinstance(faces[0], dict):
+                        # New format: list of dicts with 'face_id'
+                        face_ids = [f.get('face_id') for f in faces if isinstance(f, dict)]
+                    else:
+                        # Old format: list of face IDs
+                        face_ids = faces
                 else:
-                    faces = patch_data[2] if len(patch_data) > 2 else []
+                    face_ids = patch_data[2] if len(patch_data) > 2 else []
 
                 if self.on_select_callback:
-                    self.on_select_callback(patch_name, patch_data, highlight_faces=faces)
+                    self.on_select_callback(patch_name, patch_data, highlight_faces=face_ids)

@@ -32,8 +32,8 @@ class MeshData:
         self.hex_blocks = {}
         self.next_block_id = 1
 
-        # Patches reference point IDs and have a type
-        # Structure: {"Patch name: str": {"type": str, "Points": [id, ...], "Normal": int}}
+        # Patches reference face IDs with their 4 point IDs
+        # Structure: {"Patch name: str": {"type": str, "faces": [{"face_id": int, "point_ids": [id1, id2, id3, id4]}, ...], "Normal": int}}
         self.patches = {}
 
         # Specs - Project settings
@@ -67,7 +67,8 @@ class MeshData:
             # Get Z from layer if not specified
             if layer is None:
                 layer = self.current_layer
-            z = self.layers.get(layer, {}).get("z", 0.0)
+            layer_data = self.layers.get(layer, {})
+            z = layer_data.get("z", 0.0)
 
         # Use recycled ID if available, otherwise use next_point_id
         if self.available_point_ids:
@@ -85,8 +86,11 @@ class MeshData:
         # Add to layer if specified
         if layer is not None:
             if layer in self.layers:
-                if point_id not in self.layers[layer]["point_refs"]:
-                    self.layers[layer]["point_refs"].append(point_id)
+                layer_data = self.layers[layer]
+                point_refs = layer_data.get("point_refs", [])
+                if point_id not in point_refs:
+                    point_refs.append(point_id)
+                    layer_data["point_refs"] = point_refs
 
         return point_id
 
@@ -102,16 +106,19 @@ class MeshData:
 
         # Remove from all layers
         for layer_name, layer_data in self.layers.items():
-            if point_id in layer_data.get("point_refs", []):
-                layer_data.get("point_refs", []).remove(point_id)
+            point_refs = layer_data.get("point_refs", [])
+            if point_id in point_refs:
+                point_refs.remove(point_id)
+                layer_data["point_refs"] = point_refs
 
         # Remove from all connections (and delete connections involving this point)
         conns_to_delete = []
         for conn_id, conn in self.connections.items():
-            if conn["point1"] == point_id or conn["point2"] == point_id:
+            if conn.get("point1") == point_id or conn.get("point2") == point_id:
                 conns_to_delete.append(conn_id)
         for conn_id in conns_to_delete:
-            del self.connections[conn_id]
+            if conn_id in self.connections:
+                del self.connections[conn_id]
 
         # Remove from all edges
         edges_to_delete = []
@@ -129,26 +136,34 @@ class MeshData:
                 has_point = True
             if has_point:
                 edges_to_delete.append(edge_id)
-        
+
         for edge_id in edges_to_delete:
-            del self.edges[edge_id]
+            if edge_id in self.edges:
+                del self.edges[edge_id]
 
         # Remove from all hex blocks (and delete blocks that become invalid)
         blocks_to_delete = []
         for block_id, block_data in self.hex_blocks.items():
-            if point_id in block_data["point_refs"]:
+            block_point_refs = block_data.get("point_refs", [])
+            if point_id in block_point_refs:
                 # Remove the point ref
-                block_data["point_refs"].remove(point_id)
+                block_point_refs.remove(point_id)
+                block_data["point_refs"] = block_point_refs
                 # Mark for deletion if less than 4 points (can't form a valid cell)
-                if len(block_data["point_refs"]) < 4:
+                if len(block_point_refs) < 4:
                     blocks_to_delete.append(block_id)
         for block_id in blocks_to_delete:
-            del self.hex_blocks[block_id]
+            if block_id in self.hex_blocks:
+                del self.hex_blocks[block_id]
 
         # Remove from all patches
         for patch_name, patch_data in self.patches.items():
-            if point_id in patch_data["point_refs"]:
-                patch_data["point_refs"].remove(point_id)
+            patch_faces = patch_data.get("faces", [])
+            # Check each face's point_ids for this point
+            for face in patch_faces:
+                if isinstance(face, dict) and 'point_ids' in face:
+                    if point_id in face['point_ids']:
+                        face['point_ids'].remove(point_id)
 
         # Finally, remove the point itself
         del self.points[point_id_str]
@@ -165,9 +180,9 @@ class MeshData:
         point_data = self.points.get(str(point_id))
         if point_data:
             return {
-                "x": point_data["X"],
-                "y": point_data["Y"],
-                "z": point_data["Z"]
+                "x": point_data.get("X", 0),
+                "y": point_data.get("Y", 0),
+                "z": point_data.get("Z", 0)
             }
         return None
 
@@ -214,26 +229,31 @@ class MeshData:
     def set_layer_z(self, name, z_value):
         """Update Z value of a layer. Points keep their IDs."""
         if name in self.layers:
-            self.layers[name]["z"] = float(z_value)
+            layer_data = self.layers[name]
+            layer_data["z"] = float(z_value)
             # Also update Z coordinate of all points in this layer
-            for point_id in self.layers[name]["point_refs"]:
+            for point_id in layer_data.get("point_refs", []):
                 self.update_point(point_id, z=z_value)
             return True
         return False
 
     def get_layer_z(self, name):
         """Get Z value of a layer."""
-        return self.layers.get(name, {}).get("z")
+        layer_data = self.layers.get(name, {})
+        return layer_data.get("z", 0.0)
 
     def add_point_to_layer(self, point_id, layer_name):
         """Add an existing point reference to a layer."""
         if layer_name not in self.layers or str(point_id) not in self.points:
             return False
 
-        if point_id not in self.layers[layer_name]["point_refs"]:
-            self.layers[layer_name]["point_refs"].append(point_id)
+        layer_data = self.layers[layer_name]
+        point_refs = layer_data.get("point_refs", [])
+        if point_id not in point_refs:
+            point_refs.append(point_id)
+            layer_data["point_refs"] = point_refs
             # Update point Z to match layer
-            z = self.layers[layer_name]["z"]
+            z = layer_data.get("z", 0.0)
             self.update_point(point_id, z=z)
 
         return True
@@ -241,8 +261,11 @@ class MeshData:
     def remove_point_from_layer(self, point_id, layer_name):
         """Remove a point reference from a layer (doesn't delete point)."""
         if layer_name in self.layers:
-            if point_id in self.layers[layer_name]["point_refs"]:
-                self.layers[layer_name]["point_refs"].remove(point_id)
+            layer_data = self.layers[layer_name]
+            point_refs = layer_data.get("point_refs", [])
+            if point_id in point_refs:
+                point_refs.remove(point_id)
+                layer_data["point_refs"] = point_refs
                 return True
         return False
 
@@ -260,7 +283,7 @@ class MeshData:
 
         # Check if exists
         for conn_id, conn in self.connections.items():
-            if conn["point1"] == p1 and conn["point2"] == p2:
+            if conn.get("point1") == p1 and conn.get("point2") == p2:
                 return conn_id  # Already exists
 
         conn_id = self.next_connection_id
@@ -299,7 +322,7 @@ class MeshData:
         }
         if intermediate is not None:
             edge_data["intermediate"] = intermediate
-            
+
         self.edges[str(edge_id)] = edge_data
         self.next_edge_id += 1
         return edge_id
@@ -352,7 +375,7 @@ class MeshData:
         if not block_data:
             return None
 
-        refs = block_data["point_refs"]
+        refs = block_data.get("point_refs", [])
         vertices = []
         for pid in refs:
             pt = self.get_point(pid)
@@ -366,20 +389,22 @@ class MeshData:
     # PATCH OPERATIONS
     # =========================================================================
 
-    def add_patch(self, name, patch_type, point_refs, normal=1):
+    def add_patch(self, name, patch_type, face_data, normal=1):
         """
-        Add a patch with type and point references.
-        point_refs: list of point IDs that form the patch faces
+        Add a patch with type and face data.
+        face_data: list of dicts with 'face_id' and 'point_ids' (4 point IDs per face)
         normal: direction (1 or -1)
         """
-        # Validate all points exist
-        for pid in point_refs:
-            if str(pid) not in self.points:
-                return False
+        # Validate all point IDs exist
+        for face in face_data:
+            if isinstance(face, dict) and 'point_ids' in face:
+                for pid in face['point_ids']:
+                    if str(pid) not in self.points:
+                        return False
 
         self.patches[name] = {
             "type": patch_type,
-            "point_refs": list(point_refs),
+            "faces": face_data,  # List of dicts with face_id and point_ids
             "Normal": normal
         }
         return True
@@ -394,7 +419,8 @@ class MeshData:
     def update_patch_type(self, name, new_type):
         """Change patch type."""
         if name in self.patches:
-            self.patches[name]["type"] = new_type
+            patch_data = self.patches[name]
+            patch_data["type"] = new_type
             return True
         return False
 
@@ -424,7 +450,7 @@ class MeshData:
         import re
         # FIXED: Use raw string with correct pattern to replace invalid filename characters
         # Pattern matches: < > : " / \ | ? *
-        safe_name = re.sub(r'[<>:"/\\|?*]', '_', self.project_name)
+        safe_name = re.sub(r'[<>\":/\\|?*]', '_', self.project_name)
         safe_name = safe_name.strip('. ')
         if not safe_name:
             safe_name = "untitled_project"
@@ -433,7 +459,7 @@ class MeshData:
     def get_all_points_list(self):
         """Get points as a list ordered by ID for blockMeshDict export."""
         sorted_ids = sorted(self.points.keys(), key=lambda x: int(x))
-        return [(self.points[pid]["X"], self.points[pid]["Y"], self.points[pid]["Z"]) 
+        return [(self.points[pid].get("X", 0), self.points[pid].get("Y", 0), self.points[pid].get("Z", 0)) 
                 for pid in sorted_ids]
 
     def get_total_points(self):
@@ -443,7 +469,6 @@ class MeshData:
     def get_all_3d_points(self):
         """Get all points as 3D coordinates - alias for get_all_points_list for compatibility"""
         return self.get_all_points_list(), self.get_point_index_map()
-
 
     def get_point_index_map(self):
         """Get mapping from point_id to 0-based index for export."""
@@ -455,18 +480,19 @@ class MeshData:
         Returns (x, y, z) tuple or None if point doesn't exist."""
         point_data = self.points.get(str(global_idx))
         if point_data:
-            return (point_data["X"], point_data["Y"], point_data["Z"])
+            return (point_data.get("X", 0), point_data.get("Y", 0), point_data.get("Z", 0))
         return None
-    
+
     def get_layer_from_global_index(self, global_idx):
         """Find which layer contains a given point ID.
         Returns (layer_name, local_index) or (None, None) if not found."""
         for layer_name, layer_data in self.layers.items():
-            if global_idx in layer_data.get("point_refs", []):
-                local_idx = layer_data.get("point_refs", []).index(global_idx)
+            point_refs = layer_data.get("point_refs", [])
+            if global_idx in point_refs:
+                local_idx = point_refs.index(global_idx)
                 return layer_name, local_idx
         return None, None
-    
+
     def get_3d_coords(self, layer_name, point_2d):
         """Get 3D coordinates for a point in a layer.
         point_2d can be an index or a dict with x, y.
@@ -474,9 +500,11 @@ class MeshData:
         # If point_2d is an index, look up in layer's point_refs
         if isinstance(point_2d, int):
             layer_data = self.layers.get(layer_name)
-            if layer_data and point_2d < len(layer_data.get("point_refs", [])):
-                point_id = layer_data.get("point_refs", [])[point_2d]
-                return self.get_3d_coords_from_global(point_id)
+            if layer_data:
+                point_refs = layer_data.get("point_refs", [])
+                if point_2d < len(point_refs):
+                    point_id = point_refs[point_2d]
+                    return self.get_3d_coords_from_global(point_id)
         # If point_2d is a dict with x, y
         elif isinstance(point_2d, dict):
             z = self.get_layer_z(layer_name)
@@ -505,7 +533,7 @@ class MeshData:
         self._init_default()
 
     # =========================================================================
-    # SERIALIZATION - FIXED for TabEdgeEditor compatibility
+    # SERIALIZATION - FIXED for proper patch face export
     # =========================================================================
 
     def _format_point_ref(self, ref):
@@ -515,7 +543,7 @@ class MeshData:
         elif isinstance(ref, (list, tuple)) and len(ref) == 3:
             return f"({ref[0]},{ref[1]},{ref[2]})"
         return str(ref)
-    
+
     def _parse_point_ref(self, ref_str):
         """Parse a point reference from JSON string"""
         ref_str = ref_str.strip()
@@ -535,19 +563,30 @@ class MeshData:
 
     def to_dict(self):
         """Convert to dictionary for JSON serialization - matches new_data_structure.json"""
+        try:
+            return self._to_dict_internal()
+        except Exception as e:
+            import traceback
+            print(f"ERROR in to_dict: {e}")
+            traceback.print_exc()
+            raise
+
+    def _to_dict_internal(self):
+        """Internal method for to_dict with error handling"""
         # Convert points to the format: "Point num: int (Point 1)": {"X": float, "Y": float, "Z": float}
         points_dict = {}
         for point_id, point_data in self.points.items():
             points_dict[f"Point {point_id}"] = {
-                "X": point_data["X"],
-                "Y": point_data["Y"],
-                "Z": point_data["Z"]
+                "X": point_data.get("X", 0),
+                "Y": point_data.get("Y", 0),
+                "Z": point_data.get("Z", 0)
             }
 
         # Convert layers to the format: "Layer Name: int": {"Points (Ref)": "1, 2..."}
         layers_dict = {}
         for layer_name, layer_data in self.layers.items():
-            point_refs_str = ", ".join([str(p) for p in layer_data.get("point_refs", [])])
+            point_refs = layer_data.get("point_refs", [])
+            point_refs_str = ", ".join([str(p) for p in point_refs])
             layers_dict[layer_name] = {
                 "Points (Ref)": point_refs_str
             }
@@ -556,8 +595,8 @@ class MeshData:
         connections_dict = {}
         for conn_id, conn_data in self.connections.items():
             connections_dict[f"Connection {conn_id}"] = {
-                "Point 1": conn_data["point1"],
-                "Point 2": conn_data["point2"]
+                "Point 1": conn_data.get("point1", 0),
+                "Point 2": conn_data.get("point2", 0)
             }
 
         # Convert edges to the format: "Edge num: int": {"type": str, "Points": "start, end, intermediate..."}
@@ -566,17 +605,17 @@ class MeshData:
         for edge_id, edge_data in self.edges.items():
             # Build points list: start, end, then intermediate(s)
             points_list = []
-            
+
             # Add start point
             start = edge_data.get("start")
             if start is not None:
                 points_list.append(self._format_point_ref(start))
-            
+
             # Add end point
             end = edge_data.get("end")
             if end is not None:
                 points_list.append(self._format_point_ref(end))
-            
+
             # Add intermediate point(s)
             intermediate = edge_data.get("intermediate")
             if intermediate is not None:
@@ -585,9 +624,9 @@ class MeshData:
                         points_list.append(self._format_point_ref(pt))
                 else:
                     points_list.append(self._format_point_ref(intermediate))
-            
+
             point_refs_str = ", ".join(points_list)
-            
+
             edges_dict[f"Edge {edge_id}"] = {
                 "type": edge_data.get("type", "line"),
                 "Points": point_refs_str
@@ -596,18 +635,63 @@ class MeshData:
         # Convert hex blocks to the format: "Hex num: int": {"Points": "Point 1, Point 2, ..."}
         hexes_dict = {}
         for block_id, block_data in self.hex_blocks.items():
-            point_refs_str = ", ".join([f"Point {p}" for p in block_data["point_refs"]])
+            point_refs = block_data.get("point_refs", [])
+            point_refs_str = ", ".join([f"Point {p}" for p in point_refs])
             hexes_dict[f"Hex {block_id}"] = {
                 "Points": point_refs_str
             }
 
-        # Convert patches to the format: "Patch name: str": {"type": str, "Points": "Point 1, Point 2...", "Normal": int}
+        # CRITICAL FIX: Convert patches to store 4 point IDs per face
+        # Format: "Patch name: str": {"type": str, "Points": "(p1 p2 p3 p4), (p5 p6 p7 p8)...", "Normal": int}
         patches_dict = {}
         for patch_name, patch_data in self.patches.items():
-            point_refs_str = ", ".join([f"Point {p}" for p in patch_data["point_refs"]])
+            # SAFETY: Skip if patch_data is None
+            if patch_data is None:
+                print(f"WARNING: Patch '{patch_name}' has None data, skipping")
+                continue
+
+            # SAFETY: Ensure patch_data is a dict
+            if not isinstance(patch_data, dict):
+                print(f"WARNING: Patch '{patch_name}' is not a dict (type: {type(patch_data)}), skipping")
+                continue
+
+            faces = patch_data.get("faces", [])
+
+            # SAFETY: Ensure faces is a list
+            if faces is None:
+                print(f"WARNING: Patch '{patch_name}' has None faces, using empty list")
+                faces = []
+
+            # Build string of 4 point IDs per face: "(0 4 7 3), (1 5 6 2)"
+            face_strs = []
+            missing_point_ids = []
+            for i, face in enumerate(faces):
+                if isinstance(face, dict) and 'point_ids' in face:
+                    pids = face['point_ids']
+                    # SAFETY: Check pids is not None and has 4 elements
+                    if pids is not None and len(pids) == 4:
+                        face_strs.append(f"({pids[0]} {pids[1]} {pids[2]} {pids[3]})")
+                    else:
+                        missing_point_ids.append(f"face[{i}]: pids={pids}")
+                elif isinstance(face, int):
+                    # Legacy format: just a face ID - can't convert without renderer
+                    face_strs.append(f"(face_{face})")
+                    missing_point_ids.append(f"face[{i}]: legacy int format")
+                else:
+                    missing_point_ids.append(f"face[{i}]: type={type(face)}")
+
+            # Debug output if faces are missing point_ids
+            if missing_point_ids and face_strs:
+                print(f"DEBUG: Patch '{patch_name}' has {len(missing_point_ids)} faces missing point_ids (saved {len(face_strs)})")
+            elif missing_point_ids:
+                print(f"WARNING: Patch '{patch_name}' has no faces with valid point_ids!")
+                print(f"  Missing: {missing_point_ids[:3]}...")
+
+            faces_str = ", ".join(face_strs)
+
             patches_dict[patch_name] = {
-                "type": patch_data["type"],
-                "Points": point_refs_str,
+                "type": patch_data.get("type", "patch"),
+                "Points": faces_str,  # Now contains "(p1 p2 p3 p4), (p5 p6 p7 p8)" format!
                 "Normal": patch_data.get("Normal", 1)
             }
 
@@ -629,7 +713,6 @@ class MeshData:
             "Patches": patches_dict,
             "Specs": specs_dict
         }
-
 
     def from_dict(self, data):
         """Load from dictionary - matches new_data_structure.json"""
@@ -658,15 +741,16 @@ class MeshData:
             try:
                 point_id = int(point_key.replace("Point ", ""))
                 self.points[str(point_id)] = {
-                    "X": float(point_data["X"]),
-                    "Y": float(point_data["Y"]),
-                    "Z": float(point_data["Z"])
+                    "X": float(point_data.get("X", 0)),
+                    "Y": float(point_data.get("Y", 0)),
+                    "Z": float(point_data.get("Z", 0))
                 }
                 if point_id > max_point_id:
                     max_point_id = point_id
-            except:
+            except Exception as e:
+                print(f"Error loading point {point_key}: {e}")
                 continue
-        self.next_point_id = max_point_id + 1
+        self.next_point_id = max_point_id + 1 if max_point_id > 0 else 1
 
         # Load Layers
         layers_data = data.get("Layers", {})
@@ -676,14 +760,15 @@ class MeshData:
             if point_refs_str:
                 try:
                     point_refs = [int(p.strip()) for p in point_refs_str.split(",") if p.strip()]
-                except:
+                except Exception as e:
+                    print(f"Error parsing layer {layer_name} point refs: {e}")
                     point_refs = []
             # Extract Z from first point if available
             z_value = 0.0
             if point_refs:
                 first_point = self.points.get(str(point_refs[0]))
                 if first_point:
-                    z_value = first_point["Z"]
+                    z_value = first_point.get("Z", 0.0)
             self.layers[layer_name] = {
                 "z": z_value,
                 "point_refs": point_refs if point_refs else []
@@ -696,14 +781,15 @@ class MeshData:
             try:
                 conn_id = int(conn_key.replace("Connection ", ""))
                 self.connections[str(conn_id)] = {
-                    "point1": int(conn_data["Point 1"]),
-                    "point2": int(conn_data["Point 2"])
+                    "point1": int(conn_data.get("Point 1", 0)),
+                    "point2": int(conn_data.get("Point 2", 0))
                 }
                 if conn_id > max_conn_id:
                     max_conn_id = conn_id
-            except:
+            except Exception as e:
+                print(f"Error loading connection {conn_key}: {e}")
                 continue
-        self.next_connection_id = max_conn_id + 1
+        self.next_connection_id = max_conn_id + 1 if max_conn_id > 0 else 1
 
         # Load Edges - NEW FORMAT with start, end, intermediate
         edges_data = data.get("Edges", {})
@@ -711,10 +797,10 @@ class MeshData:
         for edge_key, edge_data in edges_data.items():
             try:
                 edge_id = int(edge_key.replace("Edge ", ""))
-                
+
                 points_str = edge_data.get("Points", "")
                 points_list = []
-                
+
                 # Parse points string: "1, 2, (1.5,2.5,0)" or "(0,0,0), (1,0,0), (0.5,0.5,0)"
                 if points_str:
                     # Split carefully handling tuples with commas inside
@@ -735,30 +821,30 @@ class MeshData:
                             current += char
                     if current.strip():
                         parts.append(current.strip())
-                    
+
                     for part in parts:
                         points_list.append(self._parse_point_ref(part))
-                
+
                 # Build edge data
                 edge_dict = {"type": edge_data.get("type", "line")}
-                
+
                 if len(points_list) >= 2:
                     edge_dict["start"] = points_list[0]
                     edge_dict["end"] = points_list[1]
-                    
+
                     if len(points_list) > 2:
                         remaining = points_list[2:]
                         # Store single intermediate as scalar, multiple as list
                         edge_dict["intermediate"] = remaining[0] if len(remaining) == 1 else remaining
-                
+
                 self.edges[str(edge_id)] = edge_dict
                 if edge_id > max_edge_id:
                     max_edge_id = edge_id
-                    
+
             except Exception as e:
                 print(f"Error loading edge {edge_key}: {e}")
                 continue
-        self.next_edge_id = max_edge_id + 1
+        self.next_edge_id = max_edge_id + 1 if max_edge_id > 0 else 1
 
         # Load Hexes
         hexes_data = data.get("Hexes", {})
@@ -779,25 +865,41 @@ class MeshData:
                 }
                 if block_id > max_block_id:
                     max_block_id = block_id
-            except:
+            except Exception as e:
+                print(f"Error loading hex {hex_key}: {e}")
                 continue
-        self.next_block_id = max_block_id + 1
+        self.next_block_id = max_block_id + 1 if max_block_id > 0 else 1
 
-        # Load Patches
+        # CRITICAL FIX: Load Patches with proper face point IDs
+        # Format: "Points": "(0 4 7 3), (1 5 6 2)" - 4 point IDs per face
         patches_data = data.get("Patches", {})
         for patch_name, patch_data in patches_data.items():
-            points_str = patch_data.get("Points", "")
-            point_refs = []
-            if points_str:
-                import re
-                matches = re.findall(r"Point (\d+)", points_str)
-                point_refs = [int(m) for m in matches]
+            try:
+                points_str = patch_data.get("Points", "")
 
-            self.patches[patch_name] = {
-                "type": patch_data.get("type", "patch"),
-                "point_refs": point_refs,
-                "Normal": patch_data.get("Normal", 1)
-            }
+                # Parse faces with 4 point IDs each: "(0 4 7 3), (1 5 6 2)"
+                face_data = []
+                if points_str:
+                    # Find all tuples of 4 numbers
+                    import re
+                    # Match pattern like "(0 4 7 3)" or "(0, 4, 7, 3)"
+                    face_matches = re.findall(r'\((\d+)[\s,]+(\d+)[\s,]+(\d+)[\s,]+(\d+)\)', points_str)
+
+                    for match in face_matches:
+                        p1, p2, p3, p4 = map(int, match)
+                        face_data.append({
+                            'face_id': len(face_data),  # Generate new face ID
+                            'point_ids': [p1, p2, p3, p4]  # Store the 4 point IDs!
+                        })
+
+                self.patches[patch_name] = {
+                    "type": patch_data.get("type", "patch"),
+                    "faces": face_data,  # Now contains proper face data with 4 point IDs each
+                    "Normal": patch_data.get("Normal", 1)
+                }
+            except Exception as e:
+                print(f"Error loading patch {patch_name}: {e}")
+                continue
 
         # Load Specs
         specs_data = data.get("Specs", {})
@@ -812,41 +914,3 @@ class MeshData:
             self.current_layer = list(self.layers.keys())[0]
         else:
             self._init_default()
-
-    # =========================================================================
-    # MISC
-    # =========================================================================
-    
-    def get_3d_coords_from_global(self, global_idx):
-        """Get 3D coordinates for a global point ID.
-        Returns (x, y, z) tuple or None if point doesn't exist."""
-        point_data = self.points.get(str(global_idx))
-        if point_data:
-            return (point_data["X"], point_data["Y"], point_data["Z"])
-        return None
-    
-    def get_layer_from_global_index(self, global_idx):
-        """Find which layer contains a given point ID.
-        Returns (layer_name, local_index) or (None, None) if not found."""
-        for layer_name, layer_data in self.layers.items():
-            if global_idx in layer_data.get("point_refs", []):
-                local_idx = layer_data.get("point_refs", []).index(global_idx)
-                return layer_name, local_idx
-        return None, None
-    
-    def get_3d_coords(self, layer_name, point_2d):
-        """Get 3D coordinates for a point in a layer.
-        point_2d can be an index or a dict with x, y.
-        Returns (x, y, z) tuple."""
-        # If point_2d is an index, look up in layer's point_refs
-        if isinstance(point_2d, int):
-            layer_data = self.layers.get(layer_name)
-            if layer_data and point_2d < len(layer_data.get("point_refs", [])):
-                point_id = layer_data.get("point_refs", [])[point_2d]
-                return self.get_3d_coords_from_global(point_id)
-        # If point_2d is a dict with x, y
-        elif isinstance(point_2d, dict):
-            z = self.get_layer_z(layer_name)
-            return (point_2d.get("x", 0), point_2d.get("y", 0), z)
-        return (0, 0, 0)
-    

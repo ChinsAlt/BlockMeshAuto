@@ -163,7 +163,15 @@ Click "Flip Normal Mode" then click a face to reverse its normal."""
         
         # Get patch data
         patch_data = self.mesh_data.patches.get(patch_name, {})
-        face_ids = patch_data.get('faces', [])
+        faces_data = patch_data.get('faces', [])
+
+        # FIXED: Handle new face format where faces are dicts with 'face_id'
+        if faces_data and isinstance(faces_data[0], dict):
+            # New format: extract face_ids from dicts
+            face_ids = {f.get('face_id') for f in faces_data if isinstance(f, dict)}
+        else:
+            # Legacy format: face_ids are integers
+            face_ids = set(faces_data)
         
         # Build face data for this patch
         self.patch_faces = []
